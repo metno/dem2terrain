@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # GDAL's Python bindings and its command-line utilities have no wheel:
+    # use the system's (GDAL 3.8 on Ubuntu 24.04). The mago-3d-terrainer
+    # image is pulled by the digest the library names, so the tool run in CI
+    # is the one the library pins.
+    name: tests with the system GDAL and the mago image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdal-bin python3-gdal python3-numpy python3-venv
+          python3 -m venv --system-site-packages .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: Pull the mago-3d-terrainer image
+        run: docker pull "$(.venv/bin/python -c 'import dem2terrain; print(dem2terrain.DEFAULT_MAGO_IMAGE)')"
+      - name: Show environment
+        run: .venv/bin/python -c "from osgeo import gdal; import numpy, dem2terrain; print('dem2terrain', dem2terrain.__version__, '| gdal', gdal.__version__, '| numpy', numpy.__version__)"
+      - name: Run tests
+        run: .venv/bin/python -m pytest -q -rs
+      - name: Command line
+        run: .venv/bin/dem2terrain --version
+
+  package:
+    name: packaging metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - name: Build and check the distribution
+        run: |
+          python -m build
+          python -m twine check dist/*
