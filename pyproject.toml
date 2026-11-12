@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dem2terrain"
+version = "0.1.0"
+description = "DEM GeoTIFF to terrain tiles: terrain-RGB raster tiles and quantized-mesh terrain"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Massimo Di Stefano", email = "massimods@met.no" }]
+keywords = ["dem", "terrain", "terrain-rgb", "quantized-mesh", "cesium", "maplibre", "gdal"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Intended Audience :: Science/Research",
+]
+# GDAL's Python bindings (osgeo) and its command-line utilities come from the
+# system's GDAL; they have no wheel, so they are not listed here.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8", "numpy"]
+
+[project.scripts]
+dem2terrain = "dem2terrain.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/metno/dem2terrain"
+Source = "https://github.com/metno/dem2terrain"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "docker: runs mago-3d-terrainer from its container image (needs a Docker daemon and the image)",
+]
