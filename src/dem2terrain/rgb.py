@@ -20,7 +20,6 @@ from tempfile import TemporaryDirectory
 
 from dem2terrain import prepare
 from dem2terrain._run import CancelCheck, check_cancel, run
-from dem2terrain.errors import SmoothingUnavailable
 from dem2terrain.mbtiles import pack_xyz_dir_to_mbtiles
 
 StrPath = str | PathLike[str]
@@ -56,10 +55,15 @@ def encode_terrain_rgb(dem: StrPath, dst: StrPath, *, work_dir: StrPath | None =
                     "--NoDataValue=0",
                 ]
             )
+        # gdal_merge.py drops the bands' nodata; without it gdal2tiles draws
+        # the cells the fill did not reach as opaque (0, 0, 0), which decodes
+        # to -10000 m. No height in range encodes to R = 0, so 0 is safe.
         run(
             [
                 "gdal_merge.py",
                 "-separate",
+                "-a_nodata",
+                "0",
                 "-o",
                 str(dst),
                 *[str(b) for b in bands],
@@ -93,16 +97,14 @@ def terrain_rgb(
     min_elev: float = 0.0,
     max_elev: float = 2000.0,
     fill_nodata: bool = True,
-    smooth: bool = False,
-    smooth_sigma: float = 1.0,
     overwrite: bool = False,
     cancel: CancelCheck | None = None,
 ) -> dict[str, object]:
     """Terrain-RGB tiles of a single-band DEM.
 
     Steps: warp to EPSG:3857 (bilinear); with ``preprocess``, fill nodata
-    (when ``fill_nodata``), clamp to ``[min_elev, max_elev]`` and smooth (when
-    ``smooth``); encode; cut XYZ PNG tiles with ``gdal2tiles.py`` into
+    (when ``fill_nodata``) and clamp to ``[min_elev, max_elev]``; encode; cut
+    XYZ PNG tiles with ``gdal2tiles.py`` (nearest resampling) into
     ``out_dir/tiles``, or pack them into ``out_dir/terrain.mbtiles`` when
     ``mbtiles``. ``workers`` 0 means one per CPU. ``cancel`` is called between
     steps; when it returns true, :class:`~dem2terrain.Cancelled` is raised.
@@ -119,13 +121,6 @@ def terrain_rgb(
         raise ValueError("workers must be >= 0")
     if preprocess and float(min_elev) > float(max_elev):
         raise ValueError("min_elev must be <= max_elev")
-    if preprocess and smooth:
-        if float(smooth_sigma) <= 0:
-            raise ValueError("smooth_sigma must be > 0")
-        if not prepare.smoothing_available():
-            raise SmoothingUnavailable(
-                f"smoothing needs {prepare.SMOOTH_TOOL} on PATH, and it is not installed here"
-            )
 
     dem = Path(dem)
     if not dem.exists():
@@ -150,18 +145,20 @@ def terrain_rgb(
         if preprocess:
             check_cancel(cancel)
             current = prepare.clamp(current, tmp_path / "dem_3857_clamped.tif", min_elev, max_elev)
-        if preprocess and smooth:
-            check_cancel(cancel)
-            current = prepare.smooth(current, tmp_path / "dem_3857_smoothed.tif", smooth_sigma)
 
         check_cancel(cancel)
         rgb_tif = encode_terrain_rgb(current, tmp_path / "terrain_rgb.tif", work_dir=tmp_path)
 
         check_cancel(cancel)
+        # Nearest, because the three bands are one number split in bytes:
+        # any resampling that mixes neighbours (gdal2tiles' default is
+        # "average") does it byte by byte, and where a byte carries over the
+        # decoded height jumps by up to one G step (25.6 m).
         run(
             [
                 "gdal2tiles.py",
                 "--xyz",
+                "--resampling=near",
                 f"--zoom={minzoom}-{maxzoom}",
                 f"--tilesize={tile_size}",
                 f"--processes={workers_used}",

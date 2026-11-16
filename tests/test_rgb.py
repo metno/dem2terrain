@@ -11,12 +11,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from conftest import decode, read, synthetic_heights, write_dem
+from conftest import NODATA, decode, read, synthetic_heights, write_dem
 
 import dem2terrain
 from dem2terrain import (
+    prepare,
     Cancelled,
-    SmoothingUnavailable,
     encode_terrain_rgb,
     pack_xyz_dir_to_mbtiles,
     terrain_rgb,
@@ -66,22 +66,75 @@ def test_terrain_rgb_writes_xyz_tiles(tmp_path, utm_dem):
     assert 14.9 < minlon < maxlon < 15.1 and 78.3 < minlat < maxlat < 78.5
 
 
-def test_tiles_decode_to_the_clamped_heights(tmp_path, utm_dem):
-    result = terrain_rgb(utm_dem, tmp_path / "out", minzoom=14, maxzoom=14, workers=1, max_elev=500.0)
+def _decoded_tile_heights(tiles_dir: Path) -> np.ndarray:
     decoded = []
-    for png in Path(result["tiles_dir"]).rglob("*.png"):
+    for png in Path(tiles_dir).rglob("*.png"):
         arr = read(png)
         # gdal2tiles writes RGBA; the alpha band marks the cells with data.
         decoded.append(decode(arr[:3])[arr[3] == 255])
-    values = np.concatenate(decoded)
+    return np.concatenate(decoded)
+
+
+def test_tiles_decode_to_the_clamped_heights(tmp_path, utm_dem):
+    result = terrain_rgb(utm_dem, tmp_path / "out", minzoom=14, maxzoom=14, workers=1, max_elev=500.0)
+    values = _decoded_tile_heights(result["tiles_dir"])
     assert values.min() >= 0.0
-    # gdal2tiles resamples each byte of the encoding on its own (its default
-    # is "average"), so where a byte carries over between neighbours the
-    # decoded height jumps by up to one G step (25.6 m). Kept as the service
-    # has it; here it is a few tenths of a percent of the pixels.
+    # The clamp holds in the tiles to within one encoding step: no pixel
+    # jumps by a carried byte.
     assert np.median(values) < 500.0
-    assert (values > 500.1).mean() < 0.01
-    assert values.max() < 500.0 + 25.6
+    assert values.max() <= 500.0 + 0.1 + 1e-6
+
+
+def test_every_tile_pixel_is_a_pixel_of_the_encoded_dem(tmp_path, utm_dem):
+    # The steps terrain_rgb runs before the tiling, done here by hand, so the
+    # tiles can be checked against the encoded raster they are cut from.
+    dem = prepare.reproject(utm_dem, tmp_path / "3857.tif", "EPSG:3857", threads=1)
+    dem = prepare.fill_nodata(dem, tmp_path / "filled.tif")
+    dem = prepare.clamp(dem, tmp_path / "clamped.tif", 0.0, 2000.0)
+    encoded = read(encode_terrain_rgb(dem, tmp_path / "rgb.tif"))
+    source = np.unique(decode(encoded)[encoded.any(axis=0)])
+    heights = read(dem)
+    # The encoding itself is within one 0.1 m step of the DEM.
+    assert np.abs(decode(encoded) - heights)[heights != 0].max() <= 0.1 + 1e-3
+
+    # Zooms 11-12 are coarser than the 10 m DEM (overview tiles), 15-16 finer.
+    for zooms in ((11, 12), (15, 16)):
+        result = terrain_rgb(
+            utm_dem, tmp_path / f"out{zooms[0]}", minzoom=zooms[0], maxzoom=zooms[1], workers=1
+        )
+        values = np.unique(_decoded_tile_heights(result["tiles_dir"]))
+        assert values.size > 100
+        assert np.isin(values, source).all(), f"zooms {zooms}: values no DEM pixel holds"
+
+
+def test_nodata_beyond_the_fill_is_transparent(tmp_path):
+    # A DEM whose data stop along a diagonal, as a gridded survey does: the
+    # empty corner is wider than the fill reaches, so it stays nodata.
+    heights = synthetic_heights()
+    rows, cols = heights.shape
+    y, x = np.mgrid[0:rows, 0:cols]
+    heights[x + y > 90] = NODATA
+    dem = write_dem(tmp_path / "corner.tif", heights, epsg=32633, origin=(500000.0, 8700000.0), pixel=10.0)
+
+    result = terrain_rgb(dem, tmp_path / "out", minzoom=12, maxzoom=15, workers=1)
+    transparent = opaque = 0
+    for png in Path(result["tiles_dir"]).rglob("*.png"):
+        arr = read(png)
+        alpha = arr[3] == 255
+        values = decode(arr[:3])[alpha]
+        # Every opaque pixel is a height, never the all-zero nodata encoding
+        # (which decodes to -10000 m).
+        assert values.size == 0 or values.min() >= 0.0, png
+        transparent += (~alpha).sum()
+        opaque += alpha.sum()
+    assert opaque > 0 and transparent > 0
+
+
+def test_smoothing_is_gone(tmp_path, utm_dem):
+    with pytest.raises(TypeError):
+        terrain_rgb(utm_dem, tmp_path / "out", smooth=True)
+    assert not hasattr(dem2terrain, "smooth")
+    assert not hasattr(dem2terrain, "SmoothingUnavailable")
 
 
 def test_the_same_dem_gives_the_same_bytes(tmp_path, utm_dem):
@@ -123,7 +176,6 @@ def test_pack_flips_rows_to_tms(tmp_path):
         {"tile_size": 300},
         {"workers": -1},
         {"min_elev": 10.0, "max_elev": 5.0},
-        {"smooth": True, "smooth_sigma": 0.0},
     ],
 )
 def test_bad_arguments_fail_before_any_output(tmp_path, utm_dem, kwargs):
@@ -140,21 +192,6 @@ def test_ungeoreferenced_dem_is_refused(tmp_path):
     ds = None
     with pytest.raises(ValueError, match="georeferenced"):
         terrain_rgb(path, tmp_path / "out")
-
-
-def test_smoothing_without_its_tool_is_a_clear_error(tmp_path, utm_dem, monkeypatch):
-    monkeypatch.setattr(dem2terrain.prepare, "smoothing_available", lambda: False)
-    with pytest.raises(SmoothingUnavailable, match="gdal_filter.py"):
-        terrain_rgb(utm_dem, tmp_path / "out", smooth=True)
-    assert not (tmp_path / "out").exists()
-
-
-def test_smoothing_is_skipped_without_preprocess(tmp_path, utm_dem, monkeypatch):
-    monkeypatch.setattr(dem2terrain.prepare, "smoothing_available", lambda: False)
-    result = terrain_rgb(
-        utm_dem, tmp_path / "out", smooth=True, preprocess=False, minzoom=11, maxzoom=11, workers=1
-    )
-    assert list(Path(result["tiles_dir"]).rglob("*.png"))
 
 
 def test_cancel_stops_the_run(tmp_path, utm_dem):

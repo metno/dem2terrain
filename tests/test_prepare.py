@@ -10,9 +10,9 @@ import pytest
 from conftest import NODATA, read, write_dem
 from osgeo import gdal
 
-from dem2terrain import bounds_wgs84, build_vrt, clamp, fill_nodata, reproject, smooth
+from dem2terrain import bounds_wgs84, build_vrt, clamp, fill_nodata, reproject
 from dem2terrain import prepare
-from dem2terrain.errors import CommandError, SmoothingUnavailable
+from dem2terrain.errors import CommandError
 
 
 def test_reproject_to_web_mercator(tmp_path, utm_dem):
@@ -56,14 +56,6 @@ def test_build_vrt_merges(tmp_path, wgs84_dem):
     assert (ds.RasterXSize, ds.RasterYSize) == (160, 60)
     with pytest.raises(ValueError):
         build_vrt([], tmp_path / "e.vrt")
-
-
-def test_smooth_refuses_without_its_tool(tmp_path, utm_dem, monkeypatch):
-    monkeypatch.setattr(prepare.shutil, "which", lambda name: None)
-    with pytest.raises(SmoothingUnavailable):
-        smooth(utm_dem, tmp_path / "s.tif", 1.0)
-    with pytest.raises(ValueError):
-        smooth(utm_dem, tmp_path / "s.tif", -1.0)
 
 
 def test_a_failing_tool_raises_command_error(tmp_path):

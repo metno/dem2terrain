@@ -30,12 +30,10 @@ def _parser() -> argparse.ArgumentParser:
     rgb.add_argument("--tile-size", type=int, default=256, choices=(256, 512))
     rgb.add_argument("--mbtiles", action="store_true", help="pack the tiles into terrain.mbtiles")
     rgb.add_argument("--workers", type=int, default=0, help="0: one per CPU")
-    rgb.add_argument("--no-preprocess", action="store_true", help="skip fill, clamp and smooth")
+    rgb.add_argument("--no-preprocess", action="store_true", help="skip fill and clamp")
     rgb.add_argument("--min-elev", type=float, default=0.0)
     rgb.add_argument("--max-elev", type=float, default=2000.0)
     rgb.add_argument("--no-fill-nodata", action="store_true")
-    rgb.add_argument("--smooth", action="store_true")
-    rgb.add_argument("--smooth-sigma", type=float, default=1.0)
     rgb.add_argument("--overwrite", action="store_true")
 
     mago = sub.add_parser("mago", help="quantized-mesh terrain through mago-3d-terrainer")
@@ -75,8 +73,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             min_elev=args.min_elev,
             max_elev=args.max_elev,
             fill_nodata=not args.no_fill_nodata,
-            smooth=args.smooth,
-            smooth_sigma=args.smooth_sigma,
             overwrite=args.overwrite,
         )
     else:
