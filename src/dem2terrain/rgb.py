@@ -55,10 +55,15 @@ def encode_terrain_rgb(dem: StrPath, dst: StrPath, *, work_dir: StrPath | None =
                     "--NoDataValue=0",
                 ]
             )
+        # gdal_merge.py drops the bands' nodata; without it gdal2tiles draws
+        # the cells the fill did not reach as opaque (0, 0, 0), which decodes
+        # to -10000 m. No height in range encodes to R = 0, so 0 is safe.
         run(
             [
                 "gdal_merge.py",
                 "-separate",
+                "-a_nodata",
+                "0",
                 "-o",
                 str(dst),
                 *[str(b) for b in bands],

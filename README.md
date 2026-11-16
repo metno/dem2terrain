@@ -53,6 +53,10 @@ three bytes of the encoding one by one, and where a byte carries over the
 decoded height would jump by up to one G step (25.6 m); releases before 0.2.0
 did that (`gdal2tiles.py`'s default `average`), on about 1 % of the pixels.
 
+Cells that are still nodata after the fill (or all of them, without it) are
+encoded as `(0, 0, 0)` and marked nodata, so they are transparent in the
+tiles. Releases before 0.2.0 drew them opaque, as a height of -10000 m.
+
 There is no smoothing option (0.1.0 had one, which needed a script GDAL does
 not ship); smooth the DEM before passing it in if you need to.
 

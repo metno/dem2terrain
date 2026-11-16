@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from conftest import decode, read, synthetic_heights, write_dem
+from conftest import NODATA, decode, read, synthetic_heights, write_dem
 
 import dem2terrain
 from dem2terrain import (
@@ -105,6 +105,29 @@ def test_every_tile_pixel_is_a_pixel_of_the_encoded_dem(tmp_path, utm_dem):
         values = np.unique(_decoded_tile_heights(result["tiles_dir"]))
         assert values.size > 100
         assert np.isin(values, source).all(), f"zooms {zooms}: values no DEM pixel holds"
+
+
+def test_nodata_beyond_the_fill_is_transparent(tmp_path):
+    # A DEM whose data stop along a diagonal, as a gridded survey does: the
+    # empty corner is wider than the fill reaches, so it stays nodata.
+    heights = synthetic_heights()
+    rows, cols = heights.shape
+    y, x = np.mgrid[0:rows, 0:cols]
+    heights[x + y > 90] = NODATA
+    dem = write_dem(tmp_path / "corner.tif", heights, epsg=32633, origin=(500000.0, 8700000.0), pixel=10.0)
+
+    result = terrain_rgb(dem, tmp_path / "out", minzoom=12, maxzoom=15, workers=1)
+    transparent = opaque = 0
+    for png in Path(result["tiles_dir"]).rglob("*.png"):
+        arr = read(png)
+        alpha = arr[3] == 255
+        values = decode(arr[:3])[alpha]
+        # Every opaque pixel is a height, never the all-zero nodata encoding
+        # (which decodes to -10000 m).
+        assert values.size == 0 or values.min() >= 0.0, png
+        transparent += (~alpha).sum()
+        opaque += alpha.sum()
+    assert opaque > 0 and transparent > 0
 
 
 def test_smoothing_is_gone(tmp_path, utm_dem):
