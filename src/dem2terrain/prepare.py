@@ -3,7 +3,7 @@
 # Author: Massimo Di Stefano <massimods@met.no>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""DEM preparation: reproject, merge to VRT, fill nodata, clamp, smooth.
+"""DEM preparation: reproject, merge to VRT, fill nodata, clamp.
 
 Each step runs the GDAL command-line utility it has always run, with the same
 arguments, so a DEM prepared here is the same file, byte for byte, as one
@@ -12,20 +12,13 @@ prepared by the service code these steps come from (on the same GDAL).
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Sequence
 from os import PathLike
 from pathlib import Path
 
 from dem2terrain._run import run
-from dem2terrain.errors import SmoothingUnavailable
 
 StrPath = str | PathLike[str]
-
-#: The Gaussian filter :func:`smooth` runs. It is not one of GDAL's own
-#: utilities, so it is looked up on PATH at call time.
-SMOOTH_TOOL = "gdal_filter.py"
-
 
 def reproject(
     src: StrPath,
@@ -119,31 +112,6 @@ def clamp(src: StrPath, dst: StrPath, min_elev: float, max_elev: float) -> Path:
             "--NoDataValue=0",
         ]
     )
-    return Path(dst)
-
-
-def smoothing_available() -> bool:
-    """Whether :func:`smooth` can run here."""
-
-    return shutil.which(SMOOTH_TOOL) is not None
-
-
-def smooth(src: StrPath, dst: StrPath, sigma: float = 1.0) -> Path:
-    """Gaussian smoothing with ``gdal_filter.py -gauss``.
-
-    Raises :class:`SmoothingUnavailable` when that tool is not on PATH: it is
-    not shipped with GDAL, and no other filter is substituted for it, since a
-    different filter would change the tiles.
-    """
-
-    sigma = float(sigma)
-    if sigma <= 0:
-        raise ValueError("smooth_sigma must be > 0")
-    if not smoothing_available():
-        raise SmoothingUnavailable(
-            f"smoothing needs {SMOOTH_TOOL} on PATH, and it is not installed here"
-        )
-    run([SMOOTH_TOOL, "-gauss", "-sigma", str(sigma), str(src), str(dst)])
     return Path(dst)
 
 

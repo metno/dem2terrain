@@ -9,7 +9,7 @@ A single-band DEM (GeoTIFF or anything GDAL reads) in, terrain tiles out:
   which runs on this machine or from its container image.
 
 Before either, the DEM can be prepared: reprojected, merged with others into a
-VRT, its nodata holes filled, its heights clamped, smoothed.
+VRT, its nodata holes filled, its heights clamped.
 
 Licence: GPL-3.0-or-later (see `LICENSE`).
 © 2026 Norwegian Meteorological Institute (MET Norway).
@@ -17,7 +17,7 @@ Licence: GPL-3.0-or-later (see `LICENSE`).
 ## Install
 
 ```sh
-pip install "dem2terrain @ git+https://github.com/metno/dem2terrain@v0.1.0"
+pip install "dem2terrain @ git+https://github.com/metno/dem2terrain@v0.2.0"
 ```
 
 dem2terrain calls GDAL's command-line utilities (`gdalwarp`, `gdalbuildvrt`,
@@ -38,24 +38,23 @@ result = terrain_rgb("dem.tif", "out/", minzoom=6, maxzoom=14)
 
 The steps: warp to EPSG:3857 (bilinear); fill nodata (`gdal_fillnodata.py
 -md 5 -si 2`); clamp to `[min_elev, max_elev]` (default 0–2000 m), with
-non-finite cells set to 0; encode; cut the tiles with `gdal2tiles.py --xyz`.
-`preprocess=False` skips the fill, the clamp and the smoothing; `fill_nodata`
-and `smooth` turn those two on and off.
+non-finite cells set to 0; encode; cut the tiles with `gdal2tiles.py --xyz
+--resampling=near`. `preprocess=False` skips the fill and the clamp;
+`fill_nodata=False` skips the fill alone.
 
 The encoding: `value = (h + 10000) / 0.1`, stored as `R = value / 65536`,
 `G = (value mod 65536) / 256`, `B = value mod 256` (each floored); a reader gets
 the height back as `h = -10000 + (R * 65536 + G * 256 + B) * 0.1`.
 
-Smoothing runs `gdal_filter.py -gauss`. That script does not come with GDAL;
-without it on PATH, `smooth=True` raises `SmoothingUnavailable` before any work
-is done.
+The tiles are resampled with nearest, at every zoom: each tile pixel is one
+pixel of the encoded raster, so it decodes to within one encoding step
+(0.1 m) of the prepared DEM. A resampling that mixes neighbours would mix the
+three bytes of the encoding one by one, and where a byte carries over the
+decoded height would jump by up to one G step (25.6 m); releases before 0.2.0
+did that (`gdal2tiles.py`'s default `average`), on about 1 % of the pixels.
 
-Known limit: `gdal2tiles.py` resamples each band of the encoded raster on its
-own (its default is `average`), so on pixels where a byte of the encoding
-carries over between neighbours the decoded height can be off by up to one
-G step (25.6 m). It is a small share of the pixels (under 1.5 % on the test
-DEM) and is kept as it is in this release, so tiles stay identical to the ones
-already published.
+There is no smoothing option (0.1.0 had one, which needed a script GDAL does
+not ship); smooth the DEM before passing it in if you need to.
 
 ## Quantized mesh
 

@@ -15,7 +15,7 @@ Two encoders:
   its own).
 """
 
-from dem2terrain.errors import Cancelled, CommandError, LayerJsonError, SmoothingUnavailable
+from dem2terrain.errors import Cancelled, CommandError, LayerJsonError
 from dem2terrain.mago import (
     DEFAULT_MAGO_IMAGE,
     DockerRunner,
@@ -31,11 +31,10 @@ from dem2terrain.prepare import (
     clamp,
     fill_nodata,
     reproject,
-    smooth,
 )
 from dem2terrain.rgb import encode_terrain_rgb, terrain_rgb
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Cancelled",
@@ -45,7 +44,6 @@ __all__ = [
     "LayerJsonError",
     "LocalRunner",
     "MagoRunner",
-    "SmoothingUnavailable",
     "__version__",
     "bounds_wgs84",
     "build_vrt",
@@ -56,7 +54,6 @@ __all__ = [
     "mago_mesh",
     "pack_xyz_dir_to_mbtiles",
     "reproject",
-    "smooth",
     "terrain_rgb",
     "unpack_mbtiles_to_xyz",
 ]

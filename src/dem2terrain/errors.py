@@ -24,9 +24,5 @@ class Cancelled(RuntimeError):
     """The caller's ``cancel`` callable returned true between two steps."""
 
 
-class SmoothingUnavailable(RuntimeError):
-    """Smoothing was asked for, but the filter tool it runs is not installed."""
-
-
 class LayerJsonError(RuntimeError):
     """A quantized-mesh run finished without a readable ``layer.json``."""
